@@ -13,27 +13,28 @@ import gc
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Worker pool configurations
-CLIENT_WORKER_POOLS = [1, 5, 50]
-SERVER_WORKER_POOLS = [1, 5, 50]
+# Client worker configurations
+CLIENT_WORKERS = [1, 5, 50]  # Client worker counts to test
 
-def generate_test_files():
-    """Generate test files of different sizes"""
-    sizes = {
-        'test_10mb.bin': 10,
-        'test_50mb.bin': 50,
-        'test_100mb.bin': 100
+def ensure_test_files():
+    """Ensure test files exist in the files directory"""
+    files_dir = "./files"
+    if not os.path.exists(files_dir):
+        os.makedirs(files_dir)
+        logging.info(f"Created directory: {files_dir}")
+    
+    file_sizes = {
+        'test_10mb.bin': 10 * 1024 * 1024,
+        'test_50mb.bin': 50 * 1024 * 1024,
+        'test_100mb.bin': 100 * 1024 * 1024
     }
     
-    for filename, size_mb in sizes.items():
-        if not os.path.exists(filename):
-            size_bytes = size_mb * 1024 * 1024
-            # Generate file in chunks to reduce memory usage
-            chunk_size = 1024 * 1024  # 1MB chunks
-            with open(filename, 'wb') as f:
-                for _ in range(size_mb):
-                    f.write(os.urandom(chunk_size))
-            logging.info(f"Generated test file {filename} of size {size_mb}MB")
+    for filename, size in file_sizes.items():
+        filepath = os.path.join(files_dir, filename)
+        if not os.path.exists(filepath):
+            with open(filepath, 'wb') as f:
+                f.write(os.urandom(size))
+            logging.info(f"Created test file: {filename}")
 
 def test_worker(operation: str, filename: str, worker_id: int) -> Tuple[bool, float, int]:
     """Worker function that executes a single test operation"""
@@ -47,7 +48,12 @@ def test_worker(operation: str, filename: str, worker_id: int) -> Tuple[bool, fl
             success = remote_upload(filename)
             
         # Get file size without loading entire file into memory
-        file_size = os.path.getsize(filename)
+        filepath = os.path.join("./files", filename)
+        if not os.path.exists(filepath):
+            logging.error(f"File not found: {filepath}")
+            return False, time.time() - start_time, 0
+            
+        file_size = os.path.getsize(filepath)
                 
         time_taken = time.time() - start_time
         logging.info(f"Worker {worker_id} completed {operation} in {time_taken:.2f} seconds")
@@ -64,8 +70,7 @@ def test_worker(operation: str, filename: str, worker_id: int) -> Tuple[bool, fl
 def run_concurrent_test(
     operation: str,
     filename: str,
-    num_clients: int,
-    server_workers: int
+    num_clients: int
 ) -> Dict:
     """Run concurrent test with specified parameters using processes"""
     start_time = time.time()
@@ -103,7 +108,6 @@ def run_concurrent_test(
         "operation": operation,
         "filename": filename,
         "num_clients": num_clients,
-        "num_server_workers": server_workers,
         "total_time": total_time,
         "total_time_per_client": total_time_per_client,
         "throughput_per_client": throughput_per_client,
@@ -122,8 +126,7 @@ def save_results_to_csv(results: List[Dict], filename: str = None) -> None:
         "Nomor",
         "Operasi",
         "Volume",
-        "Jumlah Client Worker Pool",
-        "Jumlah Server Worker Pool",
+        "Jumlah Client Worker",
         "Waktu Total per Client (seconds)",
         "Throughput per Client (bytes/second)",
         "Client Workers Sukses",
@@ -131,17 +134,28 @@ def save_results_to_csv(results: List[Dict], filename: str = None) -> None:
     ]
     
     try:
-        with open(filename, 'w', newline='') as csvfile:
+        # Check if file exists to determine if we need to write headers
+        file_exists = os.path.exists(filename)
+        
+        with open(filename, 'a', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
-            writer.writeheader()
             
-            for idx, result in enumerate(results, 1):
+            # Write headers only if file is new
+            if not file_exists:
+                writer.writeheader()
+            
+            # Get the next number based on existing rows
+            start_idx = 1
+            if file_exists:
+                with open(filename, 'r') as f:
+                    start_idx = sum(1 for _ in f)  # Count existing rows
+            
+            for idx, result in enumerate(results, start_idx):
                 row = {
                     "Nomor": idx,
                     "Operasi": result['operation'],
                     "Volume": result['filename'],
-                    "Jumlah Client Worker Pool": result['num_clients'],
-                    "Jumlah Server Worker Pool": result['num_server_workers'],
+                    "Jumlah Client Worker": result['num_clients'],
                     "Waktu Total per Client (seconds)": f"{result['total_time_per_client']:.2f}",
                     "Throughput per Client (bytes/second)": f"{result['throughput_per_client']:.2f}",
                     "Client Workers Sukses": result['successful_workers'],
@@ -149,7 +163,7 @@ def save_results_to_csv(results: List[Dict], filename: str = None) -> None:
                 }
                 writer.writerow(row)
                 
-        logging.info(f"Results saved to {filename}")
+        logging.info(f"Results appended to {filename}")
         
     except Exception as e:
         logging.error(f"Error saving results to CSV: {str(e)}")
@@ -158,11 +172,11 @@ def main():
     # Set process start method to 'spawn' for better memory management
     multiprocessing.set_start_method('spawn')
     
-    # Generate test files if they don't exist
-    generate_test_files()
+    # Ensure test files exist
+    ensure_test_files()
     
     # Test configurations
-    operations = ['download', 'upload']
+    operations = ['upload', 'download']
     file_sizes = ['test_10mb.bin', 'test_50mb.bin', 'test_100mb.bin']
     
     results = []
@@ -170,28 +184,26 @@ def main():
     # Run all combinations
     for operation in operations:
         for filename in file_sizes:
-            for num_clients in CLIENT_WORKER_POOLS:
-                for server_workers in SERVER_WORKER_POOLS:
-                    logging.info(f"Testing {operation} of {filename} with {num_clients} client workers and {server_workers} server workers")
-                    
-                    result = run_concurrent_test(
-                        operation, 
-                        filename, 
-                        num_clients,
-                        server_workers
-                    )
-                    results.append(result)
-                    
-                    print(f"\nProcess Results for {operation} {filename}:")
-                    print(f"Client Workers: {num_clients}, Server Workers: {server_workers}")
-                    print(f"Total Time per Client: {result['total_time_per_client']:.2f} seconds")
-                    print(f"Throughput per Client: {result['throughput_per_client']/1024/1024:.2f} MB/s")
-                    print(f"Successful Workers: {result['successful_workers']}")
-                    print(f"Failed Workers: {result['failed_workers']}")
-                    print("-" * 80)
-                    
-                    # Force garbage collection between tests
-                    gc.collect()
+            for num_clients in CLIENT_WORKERS:
+                logging.info(f"Testing {operation} of {filename} with {num_clients} client workers")
+                
+                result = run_concurrent_test(
+                    operation, 
+                    filename, 
+                    num_clients
+                )
+                results.append(result)
+                
+                print(f"\nProcess Results for {operation} {filename}:")
+                print(f"Client Workers: {num_clients}")
+                print(f"Total Time per Client: {result['total_time_per_client']:.2f} seconds")
+                print(f"Throughput per Client: {result['throughput_per_client']/1024/1024:.2f} MB/s")
+                print(f"Successful Workers: {result['successful_workers']}")
+                print(f"Failed Workers: {result['failed_workers']}")
+                print("-" * 80)
+                
+                # Force garbage collection between tests
+                gc.collect()
     
     # Save results to CSV
     save_results_to_csv(results)

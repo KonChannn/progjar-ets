@@ -4,29 +4,12 @@ import base64
 import logging
 import time
 import struct
-import os
 
-server_address=('172.16.16.101', 8889)
-
-# Configure socket buffer sizes
-SOCKET_BUFFER_SIZE = 256 * 1024 * 1024  # 256MB buffer (balanced size)
-CHUNK_SIZE = 256 * 1024 * 1024  # 256MB chunks for file transfer
+server_address=('0.0.0.0',7777)
 
 def send_command(command_str="", binary_data=None):
     global server_address
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
-    # Optimize socket settings
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, struct.pack('i', SOCKET_BUFFER_SIZE))
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, struct.pack('i', SOCKET_BUFFER_SIZE))
-    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    # Enable TCP keepalive
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-    # Set TCP keepalive parameters
-    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
-    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
-    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 6)
-    
     sock.connect(server_address)
     logging.warning(f"connecting to {server_address}")
     try:
@@ -43,33 +26,27 @@ def send_command(command_str="", binary_data=None):
             # Send binary data length
             data_length = len(binary_data)
             sock.sendall(struct.pack('!I', data_length))
-            # Send binary data in chunks
-            total_sent = 0
-            while total_sent < data_length:
-                sent = sock.send(binary_data[total_sent:total_sent + CHUNK_SIZE])
-                if sent == 0:
-                    raise RuntimeError("Socket connection broken")
-                total_sent += sent
+            # Send binary data
+            sock.sendall(binary_data)
             
         # Look for the response
-        data_received = b""
+        data_received = ""
         while True:
-            chunk = sock.recv(SOCKET_BUFFER_SIZE)
-            if chunk:
-                data_received += chunk
-                if b"\r\n\r\n" in data_received:
+            data = sock.recv(1024)
+            if data:
+                data_received += data.decode()
+                if "\r\n\r\n" in data_received:
                     break
             else:
                 break
                 
-        hasil = json.loads(data_received.decode())
+        hasil = json.loads(data_received)
         logging.warning("data received from server:")
         return hasil
     except Exception as e:
         logging.warning(f"error during data receiving: {str(e)}")
         return False
-    finally:
-        sock.close()
+
 
 def remote_list():
     command_str = "LIST"
@@ -89,9 +66,11 @@ def remote_get(filename=""):
     if (hasil['status']=='OK'):
         namafile = hasil['data_namafile']
         # Decode base64 string back to binary
+        print(hasil['data_file'])
         isifile = base64.b64decode(hasil['data_file'])
-        with open(namafile, 'wb') as fp:
-            fp.write(isifile)
+        fp = open(namafile,'wb+')
+        fp.write(isifile)
+        fp.close()
         return True
     else:
         print("Gagal")
@@ -99,22 +78,15 @@ def remote_get(filename=""):
 
 def remote_upload(filename=""):
     try:
-        # Get full path of the file in the files directory
-        filepath = os.path.join("./files", filename)
-        
-        # Check if file exists
-        if not os.path.exists(filepath):
-            print(f"File {filename} tidak ditemukan di direktori files")
-            return False
-            
         # Read file content in binary mode and encode to base64
-        with open(filepath, 'rb') as fp:
+        with open(filename, 'rb') as fp:
             file_content = fp.read()
-            # Encode to base64 in chunks to reduce memory usage
             file_content_b64 = base64.b64encode(file_content).decode()
         
         # Convert base64 string back to binary for sending
         binary_data = file_content_b64.encode()
+
+        print(binary_data)
         
         # Send command and binary data
         command_str = f"UPLOAD {filename}"
@@ -140,7 +112,7 @@ def remote_delete(filename=""):
         return False
 
 if __name__=='__main__':
-    server_address=('172.16.16.101', 8889)
+    server_address=('172.16.16.101',8889)
     remote_list()
     remote_upload('test.txt')
     remote_list()

@@ -13,9 +13,8 @@ import threading
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Set thread pool size based on CPU cores
-CPU_COUNT = os.cpu_count()
-MAX_WORKERS = min(CPU_COUNT * 4, 50)  # Use 4x CPU cores for threads, but max 50
+# Client worker configurations
+CLIENT_WORKERS = [1, 5, 50]  # Client worker counts to test
 
 def test_worker(operation: str, filename: str, worker_id: int) -> Tuple[bool, float, int]:
     """Worker function that executes a single test operation"""
@@ -29,7 +28,12 @@ def test_worker(operation: str, filename: str, worker_id: int) -> Tuple[bool, fl
             success = remote_upload(filename)
             
         # Get file size without loading entire file into memory
-        file_size = os.path.getsize(filename)
+        filepath = os.path.join("./files", filename)
+        if not os.path.exists(filepath):
+            logging.error(f"File not found: {filepath}")
+            return False, time.time() - start_time, 0
+            
+        file_size = os.path.getsize(filepath)
                 
         time_taken = time.time() - start_time
         logging.info(f"Worker {worker_id} completed {operation} in {time_taken:.2f} seconds")
@@ -52,11 +56,8 @@ def run_concurrent_test(
     start_time = time.time()
     results = []
     
-    # Limit number of concurrent threads
-    actual_workers = min(num_clients, MAX_WORKERS)
-    
     try:
-        with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+        with ThreadPoolExecutor(max_workers=num_clients) as executor:
             futures = [executor.submit(test_worker, operation, filename, i) 
                       for i in range(num_clients)]
             results = [future.result() for future in futures]
@@ -105,7 +106,7 @@ def save_results_to_csv(results: List[Dict], filename: str = None) -> None:
         "Nomor",
         "Operasi",
         "Volume",
-        "Jumlah Client Worker Pool",
+        "Jumlah Client Worker",
         "Waktu Total per Client (seconds)",
         "Throughput per Client (bytes/second)",
         "Client Workers Sukses",
@@ -113,16 +114,28 @@ def save_results_to_csv(results: List[Dict], filename: str = None) -> None:
     ]
     
     try:
-        with open(filename, 'w', newline='') as csvfile:
+        # Check if file exists to determine if we need to write headers
+        file_exists = os.path.exists(filename)
+        
+        with open(filename, 'a', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
-            writer.writeheader()
             
-            for idx, result in enumerate(results, 1):
+            # Write headers only if file is new
+            if not file_exists:
+                writer.writeheader()
+            
+            # Get the next number based on existing rows
+            start_idx = 1
+            if file_exists:
+                with open(filename, 'r') as f:
+                    start_idx = sum(1 for _ in f)  # Count existing rows
+            
+            for idx, result in enumerate(results, start_idx):
                 row = {
                     "Nomor": idx,
                     "Operasi": result['operation'],
                     "Volume": result['filename'],
-                    "Jumlah Client Worker Pool": result['num_clients'],
+                    "Jumlah Client Worker": result['num_clients'],
                     "Waktu Total per Client (seconds)": f"{result['total_time_per_client']:.2f}",
                     "Throughput per Client (bytes/second)": f"{result['throughput_per_client']:.2f}",
                     "Client Workers Sukses": result['successful_workers'],
@@ -130,25 +143,46 @@ def save_results_to_csv(results: List[Dict], filename: str = None) -> None:
                 }
                 writer.writerow(row)
                 
-        logging.info(f"Results saved to {filename}")
+        logging.info(f"Results appended to {filename}")
         
     except Exception as e:
         logging.error(f"Error saving results to CSV: {str(e)}")
 
-def main():
+def ensure_test_files():
+    """Ensure test files exist in the files directory"""
+    files_dir = "./files"
+    if not os.path.exists(files_dir):
+        os.makedirs(files_dir)
+        logging.info(f"Created directory: {files_dir}")
+    
+    file_sizes = {
+        'test_10mb.bin': 10 * 1024 * 1024,
+        'test_50mb.bin': 50 * 1024 * 1024,
+        'test_100mb.bin': 100 * 1024 * 1024
+    }
+    
+    for filename, size in file_sizes.items():
+        filepath = os.path.join(files_dir, filename)
+        if not os.path.exists(filepath):
+            with open(filepath, 'wb') as f:
+                f.write(os.urandom(size))
+            logging.info(f"Created test file: {filename}")
 
+def main():
+    # Ensure test files exist
+    ensure_test_files()
+    
     # Test configurations
-    operations = ['download', 'upload']
+    operations = ['upload', 'download']
     file_sizes = ['test_10mb.bin', 'test_50mb.bin', 'test_100mb.bin']
-    client_worker_counts = [1, 5, 50]  # Client worker counts to test
     
     results = []
     
     # Run all combinations
     for operation in operations:
         for filename in file_sizes:
-            for num_clients in client_worker_counts:
-                logging.info(f"Testing {operation} of {filename} with {num_clients} thread workers")
+            for num_clients in CLIENT_WORKERS:
+                logging.info(f"Testing {operation} of {filename} with {num_clients} client workers")
                 
                 result = run_concurrent_test(
                     operation, 
@@ -158,6 +192,7 @@ def main():
                 results.append(result)
                 
                 print(f"\nThread Results for {operation} {filename}:")
+                print(f"Client Workers: {num_clients}")
                 print(f"Total Time per Client: {result['total_time_per_client']:.2f} seconds")
                 print(f"Throughput per Client: {result['throughput_per_client']/1024/1024:.2f} MB/s")
                 print(f"Successful Workers: {result['successful_workers']}")
