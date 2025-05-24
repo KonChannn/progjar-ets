@@ -1,0 +1,19 @@
+Nomor,Operasi,Volume,Jumlah Client Worker,Waktu Total per Client (seconds),Throughput per Client (bytes/second),Client Workers Sukses,Client Workers Gagal
+1,download,test_10mb.bin,1,0.35,29671602.06,1,0
+2,download,test_10mb.bin,5,0.25,42112876.94,5,0
+3,download,test_10mb.bin,50,0.19,55247605.40,50,0
+4,download,test_50mb.bin,1,5.42,9680568.20,1,0
+5,download,test_50mb.bin,5,2.91,18031432.31,5,0
+6,download,test_50mb.bin,50,3.40,15436881.47,50,0
+7,download,test_100mb.bin,1,15.55,6743263.03,1,0
+8,download,test_100mb.bin,5,10.55,9936494.21,5,0
+9,download,test_100mb.bin,50,17.87,5866500.92,50,0
+10,upload,test_10mb.bin,1,0.15,68310361.71,1,0
+11,upload,test_10mb.bin,5,0.15,70521770.78,5,0
+12,upload,test_10mb.bin,50,0.16,63630754.31,50,0
+13,upload,test_50mb.bin,1,2.18,24057161.31,1,0
+14,upload,test_50mb.bin,5,1.70,30864743.14,5,0
+15,upload,test_50mb.bin,50,1.65,31810254.80,50,0
+16,upload,test_100mb.bin,1,8.74,11994190.03,1,0
+17,upload,test_100mb.bin,5,5.55,18879664.04,5,0
+18,upload,test_100mb.bin,50,17.35,6044258.64,50,0
